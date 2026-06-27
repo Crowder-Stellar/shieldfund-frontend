@@ -1,0 +1,6 @@
+{
+  "name": "ShieldFund",
+  "description": "Secure institutional-grade asset management powered by ZK-proofs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
