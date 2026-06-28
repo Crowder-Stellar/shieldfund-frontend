@@ -35,10 +35,10 @@ export default function Sidebar({ activeTab, setActiveTab, className = '' }: Sid
 
   const menuItems = [
     { id: 'campaigns', label: 'Campaigns', icon: Compass, desc: 'Discover & support initiatives' },
-    { id: 'treasury', label: 'Treasury', icon: Wallet, desc: 'Institutional vault balance' },
-    { id: 'streams', label: 'Streams & Vesting', icon: Activity, desc: 'Flowing & milestone funds' },
-    { id: 'proofs', label: 'Privacy Proofs', icon: ShieldCheck, desc: 'ZK attestations & metrics' },
-    { id: 'audit', label: 'Audit Log', icon: History, desc: 'Transparent compliance ledger' },
+    { id: 'treasury', label: 'Treasury', icon: Wallet, desc: 'Vault balance & activity' },
+    { id: 'streams', label: 'Streams', icon: Activity, desc: 'Real-time payment flows' },
+    { id: 'proofs', label: 'ZK Proofs', icon: ShieldCheck, desc: 'On-chain attestations' },
+    { id: 'audit', label: 'Audit', icon: History, desc: 'Compliance ledger' },
   ];
 
   return (
