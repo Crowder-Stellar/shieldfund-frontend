@@ -362,7 +362,7 @@ export default function App() {
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="fixed left-0 top-0 h-full w-64 z-50 md:hidden"
+                className="fixed left-0 top-0 h-full w-56 z-50 md:hidden"
               >
                 <Sidebar
                   activeTab={activeTab}
@@ -378,7 +378,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Content wrapper to handle sidebar width spacing */}
-        <div className="flex-1 md:pl-64 min-w-0 flex flex-col">
+        <div className="flex-1 md:pl-56 min-w-0 flex flex-col">
           {/* Primary Content Panel - beautifully responsive */}
           <main className="flex-1 pt-24 px-4 md:px-8 pb-32 md:pb-12 max-w-[1200px] mx-auto w-full institutional-gradient">
             <AnimatePresence mode="wait">
