@@ -1,6 +1,39 @@
 # ShieldFund Frontend
 
-ZK-gated treasury dashboard for the Stellar / Soroban ecosystem. Manage multi-sig vaults, launch fundraising campaigns, stream payments to contributors, and submit zero-knowledge proofs — all from a single React interface connected to your Freighter wallet.
+![CI](https://github.com/Crowder-Stellar/shieldfund-frontend/actions/workflows/ci.yml/badge.svg)
+![Stellar](https://img.shields.io/badge/Stellar-Testnet-blue?logo=stellar)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+![Tailwind](https://img.shields.io/badge/Tailwind-v4-38BDF8?logo=tailwindcss)
+
+ZK-gated treasury dashboard for the Stellar / Soroban ecosystem. Manage multi-sig vaults, launch fundraising campaigns, stream real-time payments to contributors, and anchor zero-knowledge proofs on-chain — all from a single React interface connected to your Freighter wallet.
+
+---
+
+## Live Testnet Deployment
+
+The contracts are live on **Stellar Testnet** and wired into this frontend. No extra config needed for testnet — just clone, `npm install`, and `npm run dev`.
+
+| Contract | ID | Explorer |
+|----------|----|---------|
+| Treasury Vault | `CAUWJPC73YLQMSV6X4QPLUVS2UZFE2PMRIQSSCDN62DNN6J76Y5RETIG` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CAUWJPC73YLQMSV6X4QPLUVS2UZFE2PMRIQSSCDN62DNN6J76Y5RETIG) |
+| Streaming | `CDU7ZIVQ3UC4K3DHV3NMQGW5UMSYFCKCC6YJKHT4YLNEZJRWL6THE6WQ` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDU7ZIVQ3UC4K3DHV3NMQGW5UMSYFCKCC6YJKHT4YLNEZJRWL6THE6WQ) |
+| Proof Registry | `CBDLHQQPKC5524CFWPD4HMPTZGWBYQNW3IKGAFH6IAYBU3F2F6AO2332` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CBDLHQQPKC5524CFWPD4HMPTZGWBYQNW3IKGAFH6IAYBU3F2F6AO2332) |
+| XLM Token SAC | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC) |
+| Admin Account | `GBJ5FP5UB4YUE2EONTPPSAGKZZGDETFZLEJXJRCALSYTJZIDVWAN3C7P` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/account/GBJ5FP5UB4YUE2EONTPPSAGKZZGDETFZLEJXJRCALSYTJZIDVWAN3C7P) |
+
+> These IDs are already set in `src/lib/contracts.ts`. For mainnet or your own testnet deploy, update that file with your contract IDs from [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts).
+
+---
+
+## Screenshots
+
+**Treasury Vault** — Live balance, deposit/disburse, attestation & asset allocation charts
+
+![Treasury Vault](docs/screenshots/treasury-tab.png)
+
+**ZK Proof Registry** — Submit and verify zero-knowledge proofs anchored on-chain
+
+![Proofs Tab](docs/screenshots/proofs-tab.png)
 
 ---
 
@@ -20,15 +53,66 @@ ZK-gated treasury dashboard for the Stellar / Soroban ecosystem. Manage multi-si
 
 ---
 
+## Work Breakdown Structure
+
+```
+shieldfund-frontend
+│
+├── Wallet Layer
+│   ├── Freighter connect / disconnect
+│   ├── Public key read + balance display
+│   └── Transaction signing (all ops go through Freighter)
+│
+├── Contract Interaction (src/lib/stellar.ts)
+│   ├── deposit()          → treasury_vault::deposit
+│   ├── disburse()         → treasury_vault::disburse
+│   ├── getStats()         → treasury_vault::get_stats
+│   ├── createStream()     → streaming::create_stream
+│   ├── getAccumulated()   → streaming::get_accumulated
+│   ├── withdraw()         → streaming::withdraw
+│   ├── registerProof()    → proof_registry::register_proof
+│   └── verifyProofExists()→ proof_registry::verify_proof_exists
+│
+├── UI — 4 Main Tabs
+│   ├── Treasury Tab
+│   │   ├── Live vault balance card
+│   │   ├── Attestation & allocation charts (Recharts)
+│   │   ├── Recent activity feed
+│   │   ├── Deposit Modal (amount input → Freighter sign)
+│   │   └── Disburse Modal (recipient + proof hash → Freighter sign)
+│   │
+│   ├── Campaigns Tab
+│   │   ├── Campaign list with progress bars
+│   │   └── Launch Campaign Modal
+│   │
+│   ├── Streams Tab
+│   │   ├── Real-time accumulating counters (50ms tick)
+│   │   ├── Stream status badges (Active / Paused / Completed)
+│   │   └── Create Stream Modal
+│   │
+│   └── Proofs Tab
+│       ├── Proof submission form
+│       ├── On-chain proof list with type badges
+│       └── Manual Verification Modal
+│
+└── Supporting Components
+    ├── Header — nav + wallet button
+    ├── Sidebar — tab switcher
+    ├── Notifications Panel — real-time event feed
+    └── Audit Log Tab — transaction history
+```
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
 | Node.js | ≥ 20 | [nodejs.org](https://nodejs.org) |
 | npm | ≥ 10 | bundled with Node |
-| Freighter wallet | latest | [freighter.app](https://www.freighter.app) — Chrome / Firefox extension |
+| Freighter | latest | [freighter.app](https://www.freighter.app) browser extension |
 
-> **Freighter is required** to sign Soroban transactions. Install it and create or import a Stellar account before running the app.
+> **Freighter is required** to sign Soroban transactions. Install it and create or import a Stellar testnet account before using the app.
 
 ---
 
@@ -39,30 +123,63 @@ ZK-gated treasury dashboard for the Stellar / Soroban ecosystem. Manage multi-si
 git clone https://github.com/Crowder-Stellar/shieldfund-frontend.git
 cd shieldfund-frontend
 
-# 2. Install dependencies
+# 2. Install
 npm install
 
-# 3. Configure environment
+# 3. (Optional) copy env — testnet IDs are already filled in
 cp .env.example .env
-# Fill in contract IDs (see Environment Variables below)
 
 # 4. Start dev server
 npm run dev
 # → http://localhost:3000
 ```
 
+The app connects to the live testnet contracts immediately — no extra setup required.
+
+---
+
+## How to Use the App
+
+### 1. Connect Your Wallet
+- Click **Connect Wallet** in the top-right header
+- Freighter opens and asks you to approve the site
+- Your Stellar public key and XLM balance appear in the header
+
+> **Need testnet XLM?** Fund your account at [https://friendbot.stellar.org?addr=YOUR_ADDRESS](https://friendbot.stellar.org)
+
+### 2. Treasury Tab — Deposit & Disburse
+- **Deposit**: Click the blue **Deposit** button → enter an amount → Freighter signs the transfer into the vault contract
+- **Disburse**: Click **Disburse** (admin only) → enter recipient address, amount, and the proof hash that justifies the payment → Freighter signs
+
+The balance card updates live on every new ledger.
+
+### 3. Campaigns Tab — Launch a Campaign
+- Click **Launch Campaign** → fill in the title, goal amount, and description
+- The campaign is recorded on-chain and appears in the list with a live progress bar
+
+### 4. Streams Tab — Real-Time Payments
+- Click **Create Stream** → enter recipient address, monthly rate (USDC/month), and end date
+- The stream card shows a live counter ticking up in real-time (interpolated every 50ms between 5-second on-chain reads)
+- Admin can **Pause / Resume** any stream
+- Recipients click **Withdraw** to claim accumulated XLM
+
+### 5. Proofs Tab — ZK Proof Registration
+- Paste your Noir proof hash and public inputs hash
+- Select the proof type: `payroll` | `operational` | `relief`
+- Click **Submit Proof** — Freighter signs the `register_proof` call to the on-chain registry
+- All registered proofs appear in the list with their Stellar Expert link
+
 ---
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_STELLAR_NETWORK` | Yes | `TESTNET` or `MAINNET` |
-| `VITE_TREASURY_VAULT_CONTRACT_ID` | Yes | From shieldfund-contracts deploy |
-| `VITE_STREAMING_CONTRACT_ID` | Yes | From shieldfund-contracts deploy |
-| `VITE_PROOF_REGISTRY_CONTRACT_ID` | Yes | From shieldfund-contracts deploy |
-
-Contract IDs are printed at the end of the [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) deploy script. The constants live in `src/lib/contracts.ts` — the only file you need to update after a deploy.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_STELLAR_NETWORK` | `TESTNET` | `TESTNET` or `MAINNET` |
+| `VITE_TREASURY_VAULT_CONTRACT_ID` | set | From [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) deploy |
+| `VITE_STREAMING_CONTRACT_ID` | set | From deploy |
+| `VITE_PROOF_REGISTRY_CONTRACT_ID` | set | From deploy |
+| `VITE_API_BASE_URL` | `http://localhost:4000` | [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) URL |
 
 ---
 
@@ -71,10 +188,10 @@ Contract IDs are printed at the end of the [shieldfund-contracts](https://github
 ```bash
 npm run dev           # Dev server → http://localhost:3000
 npm run build         # Production build → dist/
-npm run preview       # Preview the production build locally
-npm run lint          # TypeScript type-check (no emit)
-npm run test          # Run test suite once (CI mode)
-npm run test:watch    # Watch mode for TDD
+npm run preview       # Preview production build locally
+npm run lint          # TypeScript type-check
+npm run test          # Run tests once
+npm run test:watch    # Watch mode
 npm run test:ui       # Vitest browser UI
 npm run clean         # Remove dist/
 ```
@@ -85,109 +202,67 @@ npm run clean         # Remove dist/
 
 ```
 shieldfund-frontend/
-├── index.html                        # Vite HTML entry
-├── vite.config.ts                    # Vite + Tailwind plugin config
-├── tsconfig.json                     # TypeScript config
-├── .env.example                      # Environment variable template
+├── index.html
+├── vite.config.ts
+├── tsconfig.json
+├── .env.example                          # Copy to .env — testnet IDs prefilled
+├── docs/screenshots/                     # UI screenshots for README
 │
 └── src/
-    ├── main.tsx                      # React root — mounts <App />
-    ├── App.tsx                       # Root component — tab routing & global state
-    ├── types.ts                      # Shared TypeScript interfaces
-    ├── initialData.ts                # Mock data for local dev (no live contracts needed)
-    ├── index.css                     # Global styles + Tailwind directives
+    ├── main.tsx                          # React root
+    ├── App.tsx                           # Tab routing + global state
+    ├── types.ts                          # Shared TypeScript interfaces
+    ├── initialData.ts                    # Mock data (no contracts needed for local dev)
+    ├── index.css                         # Tailwind + global styles
     │
-    ├── components/                   # One file per UI section or modal
-    │   ├── Header.tsx                # Top bar — logo, active tab, wallet button
-    │   ├── Sidebar.tsx               # Left nav — tab switcher
-    │   ├── TreasuryTab.tsx           # Vault balance, deposit / disburse controls
-    │   ├── CampaignsTab.tsx          # Fundraising campaign list and detail view
-    │   ├── StreamsTab.tsx            # Real-time payment stream list + live counter
-    │   ├── ProofsTab.tsx             # ZK proof submission, status, and audit trail
-    │   ├── AuditLogTab.tsx           # On-chain transaction history
-    │   ├── WalletModal.tsx           # Freighter connect / account view
-    │   ├── DepositModal.tsx          # Deposit USDC into the vault
-    │   ├── DisburseModal.tsx         # Disburse from vault (admin + ZK-gated)
-    │   ├── LaunchCampaignModal.tsx   # Create a new fundraising campaign
-    │   ├── CreateStreamModal.tsx     # Create a new payment stream
-    │   ├── ManualVerificationModal.tsx  # Override / manual proof verification
-    │   ├── NotificationsPanel.tsx    # Real-time event notifications
-    │   └── EmptyState.tsx            # Reusable empty-list placeholder
+    ├── components/
+    │   ├── Header.tsx                    # Top bar + wallet connect
+    │   ├── Sidebar.tsx                   # Left nav
+    │   ├── TreasuryTab.tsx               # Vault balance, charts, activity
+    │   ├── CampaignsTab.tsx              # Campaign list
+    │   ├── StreamsTab.tsx                # Live stream counters
+    │   ├── ProofsTab.tsx                 # ZK proof submission + list
+    │   ├── AuditLogTab.tsx               # Transaction history
+    │   ├── WalletModal.tsx               # Freighter connect UI
+    │   ├── DepositModal.tsx              # Vault deposit form
+    │   ├── DisburseModal.tsx             # Vault disburse form
+    │   ├── LaunchCampaignModal.tsx
+    │   ├── CreateStreamModal.tsx
+    │   ├── ManualVerificationModal.tsx
+    │   ├── NotificationsPanel.tsx
+    │   └── EmptyState.tsx
     │
     ├── lib/
-    │   ├── contracts.ts              # ← Edit after deploy: contract IDs + network config
-    │   └── stellar.ts                # Soroban invocation helpers (deposit, disburse, etc.)
-    │
-    ├── assets/
-    │   └── images/                   # Static images (logo, etc.)
+    │   ├── contracts.ts                  # ← Live contract IDs + network config
+    │   └── stellar.ts                    # Soroban invocation helpers
     │
     └── test/
-        ├── setup.ts                  # Vitest global setup (DOM, mocks)
-        ├── App.test.tsx              # Smoke-test: app renders without crashing
-        ├── contracts.config.test.ts  # Validates contract ID format / network config
-        └── stellar.helpers.test.ts   # Unit tests for Stellar SDK helper functions
+        ├── setup.ts
+        ├── App.test.tsx
+        ├── contracts.config.test.ts
+        └── stellar.helpers.test.ts
 ```
 
 ---
 
-## Connecting to Live Contracts
+## CI / CD
 
-1. Deploy from [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) — the deploy script prints contract IDs.
-2. Open `src/lib/contracts.ts` and fill in `CONTRACT_IDS.TESTNET`:
+GitHub Actions runs on every push and PR:
 
-```ts
-export const CONTRACT_IDS: Record<Network, ContractSet> = {
-  TESTNET: {
-    TREASURY_VAULT:  'C...',   // paste from deploy output
-    STREAMING:       'C...',
-    PROOF_REGISTRY:  'C...',
-    USDC_SAC:        'CBIELTK6YBZJU5UP2WWQEQZMYJMZROFZKYPVCCNWY5TU4BOQ3EOWXPD',
-  },
-  // ...
-};
-```
+| Step | Trigger |
+|------|---------|
+| Type-check | PR + push to main |
+| Vitest tests | PR + push to main |
+| Vite build | PR + push to main |
+| Vercel preview deploy | PR only |
+| Vercel production deploy | Push to main |
 
-3. Set `ACTIVE_NETWORK = 'TESTNET'` (already the default).
-4. Restart the dev server — the app now reads live contract state.
-
----
-
-## Wallet Flow
-
-1. Click **Connect Wallet** in the header
-2. Freighter prompts you to approve the connection
-3. The app reads your public key and fetches your on-chain USDC balance
-4. Every transaction (deposit, disburse, stream claim, proof submit) is signed inside Freighter — the app **never** handles your secret key
-
----
-
-## Running Tests
-
-```bash
-npm run test
-```
-
-Tests use Vitest + Testing Library. They mock Freighter and the Stellar SDK so no live network is required. The test suite covers:
-
-- App renders without crashing
-- Contract config contains valid Stellar contract ID format
-- `stellarToDisplay` / `displayToStroops` conversion helpers
-- Network switching (TESTNET ↔ MAINNET)
-
----
-
-## Building for Production
-
-```bash
-npm run build
-# Output: dist/index.html + dist/assets/
-```
-
-The output is a static site — deploy to any CDN (Vercel, Netlify, Cloudflare Pages, etc.) with no server required.
+Add these secrets in GitHub → Settings → Secrets to enable Vercel deploys:
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and all `VITE_*` contract ID secrets.
 
 ---
 
 ## Related Repos
 
-- [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) — Soroban smart contracts (deploy these first)
-- [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) — Express.js API for off-chain indexing and proof pre-verification
+- [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) — Soroban smart contracts (deploy here first)
+- [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) — Express.js off-chain API
