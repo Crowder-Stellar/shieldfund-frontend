@@ -3,7 +3,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Shield, CheckCircle2, Cpu, Binary, X, ExternalLink } from 'lucide-react';
 import { VerifiableProof } from '../types';
 import { verifyProofOnChain, registerProof } from '../lib/stellar';
+import { addressToField, proveCompliance } from '../lib/proofServer';
 import { ACTIVE_NETWORK } from '../lib/contracts';
+
+// Stand-ins for real disbursement data until this modal is wired to an
+// actual payroll run: the connected wallet proves membership in a
+// single-recipient allowlist (itself) against a fixed demo budget. The ZK
+// proof this produces is real — proved and locally verified by
+// shieldfund-proof-server — only the allowlist/budget inputs are canned.
+const DEMO_AMOUNT_STROOPS = '1';
+const DEMO_BUDGET_CAP_STROOPS = '1000000000';
 
 interface ManualVerificationModalProps {
   proof: VerifiableProof | null;
@@ -127,31 +136,42 @@ export default function ManualVerificationModal({
       try {
         setChainStatus('checking');
 
-        // Deterministic SHA-256 of proof metadata
-        const raw = new TextEncoder().encode(`${proof.id}:${proof.hash}:${proof.type ?? 'payroll'}`);
-        const buf = await crypto.subtle.digest('SHA-256', raw);
-        const hashHex = Array.from(new Uint8Array(buf))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
+        if (!walletAddress) {
+          pushLog('► Proof-server: no wallet connected — cannot generate a proof.');
+          if (!cancelled) setChainStatus('exists');
+          return;
+        }
 
-        pushLog(`► SHA-256: ${hashHex.slice(0, 8)}...${hashHex.slice(-6)}`);
+        pushLog('► Proof-server: deriving recipient id from wallet address...');
+        const recipientId = await addressToField(walletAddress);
+
+        pushLog('► Proof-server: proving payroll_compliance (Noir → bb prove → bb verify)...');
+        const result = await proveCompliance({
+          recipientId,
+          amount: DEMO_AMOUNT_STROOPS,
+          proofType: proof.type ?? 'payroll',
+          allowlist: [recipientId],
+          budgetCap: DEMO_BUDGET_CAP_STROOPS,
+        });
+        pushLog(`► Proof-server: proved + locally verified in ${result.provingTimeMs}ms ✓`);
+
+        const hashHex = result.proofHash.replace(/^0x/, '');
+        const publicInputsHashHex = result.publicInputsHash.replace(/^0x/, '');
+        pushLog(`► proof_hash: ${hashHex.slice(0, 8)}...${hashHex.slice(-6)}`);
 
         const exists = await verifyProofOnChain(hashHex);
         if (exists) {
           if (!cancelled) setChainStatus('exists');
           pushLog('► Stellar: Proof already anchored on-chain ✓');
-        } else if (walletAddress) {
+        } else {
           pushLog('► Stellar: Anchoring proof to registry contract...');
-          const txHash = await registerProof(hashHex, proof.type ?? 'payroll', '0'.repeat(64), walletAddress);
+          const txHash = await registerProof(hashHex, proof.type ?? 'payroll', publicInputsHashHex, walletAddress);
           if (!cancelled) { setStellarTxHash(txHash); setChainStatus('anchored'); }
           pushLog(`► Stellar: Anchored! Tx ${txHash.slice(0, 8)}...${txHash.slice(-6)} ✓`);
-        } else {
-          if (!cancelled) setChainStatus('exists');
-          pushLog('► Stellar: No wallet — proof hash computed locally only.');
         }
       } catch (e) {
         if (!cancelled) setChainStatus('error');
-        pushLog(`► Stellar error: ${e instanceof Error ? e.message : 'Connection failed'}`);
+        pushLog(`► Error: ${e instanceof Error ? e.message : 'Connection failed'}`);
       }
     };
 
