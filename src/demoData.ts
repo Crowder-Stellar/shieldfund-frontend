@@ -1,6 +1,9 @@
 import { Campaign, MilestoneVesting, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
 
-export const initialCampaigns: Campaign[] = [
+// Sample data shown only in DEMO MODE — when contract IDs are not configured or
+// live reads from Stellar fail. The UI labels it as demo data whenever it is shown.
+
+export const demoCampaigns: Campaign[] = [
   {
     id: 'c1',
     title: 'Global Privacy Team Payroll',
@@ -21,7 +24,7 @@ export const initialCampaigns: Campaign[] = [
   }
 ];
 
-export const initialVesting: MilestoneVesting[] = [
+export const demoVesting: MilestoneVesting[] = [
   {
     id: 'v1',
     title: 'Q1 Milestone Vesting',
@@ -37,7 +40,7 @@ export const initialVesting: MilestoneVesting[] = [
   }
 ];
 
-export const initialStreams: Stream[] = [
+export const demoStreams: Stream[] = [
   {
     id: 's1',
     title: 'Dev Salary Stream',
@@ -49,7 +52,7 @@ export const initialStreams: Stream[] = [
   }
 ];
 
-export const initialProofs: VerifiableProof[] = [
+export const demoProofs: VerifiableProof[] = [
   {
     id: 'p1',
     title: 'Total Payroll Disbursement Proof - Feb 2024',
@@ -79,7 +82,7 @@ export const initialProofs: VerifiableProof[] = [
   }
 ];
 
-export const initialTransactions: Transaction[] = [
+export const demoTransactions: Transaction[] = [
   {
     id: 't1',
     type: 'Inflow',
@@ -112,14 +115,14 @@ export const initialTransactions: Transaction[] = [
   }
 ];
 
-export const initialTreasury: TreasuryData = {
+export const demoTreasury: TreasuryData = {
   vaultBalance: 150000,
   totalRaised: 248500,
   totalDisbursed: 98500,
   lastAuditTime: '2 mins ago'
 };
 
-export const initialAuditLogs: AuditLogEntry[] = [
+export const demoAuditLogs: AuditLogEntry[] = [
   {
     id: 'log1',
     timestamp: '2026-06-26 14:22:15 UTC',

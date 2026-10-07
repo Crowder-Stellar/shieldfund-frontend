@@ -163,7 +163,12 @@ The balance card updates live on every new ledger.
 - Admin can **Pause / Resume** any stream
 - Recipients click **Withdraw** to claim accumulated XLM
 
-### 5. Proofs Tab — ZK Proof Registration
+### 5. Proofs Tab — ZK Proof Verification
+- **Verify** a proof to open the verification modal. It asks once per tab for the backend admin token (kept in memory only, never stored)
+- The browser sends the circuit inputs to **shieldfund-backend** only, never directly to the proof server. The backend has the proof generated and `bb verify`-ed, then anchors it with `register_proof()` from its own submitter key
+- The modal reports real outcomes: wrong token (asks again), already anchored, circuit rejection (e.g. over budget), rate limiting, proof server down, or backend not configured. "Validated" is shown only after the backend confirms the anchor
+
+#### Legacy manual registration
 - Paste your Noir proof hash and public inputs hash
 - Select the proof type: `payroll` | `operational` | `relief`
 - Click **Submit Proof** — Freighter signs the `register_proof` call to the on-chain registry
@@ -179,7 +184,34 @@ The balance card updates live on every new ledger.
 | `VITE_TREASURY_VAULT_CONTRACT_ID` | set | From [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) deploy |
 | `VITE_STREAMING_CONTRACT_ID` | set | From deploy |
 | `VITE_PROOF_REGISTRY_CONTRACT_ID` | set | From deploy |
-| `VITE_API_BASE_URL` | `http://localhost:4000` | [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) URL |
+| `VITE_API_BASE_URL` | `http://localhost:4000` | [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) URL. Proof requests go here only, and its origin is added to the CSP `connect-src`. |
+
+> `VITE_PROOF_SERVER_URL` is gone: the browser no longer talks to the proof server.
+
+---
+
+## Live data vs demo mode
+
+On load the app reads the vault, streams, and proof registry from Soroban (read-only simulation, no wallet
+needed) and campaigns from the backend, and shows a green **Live · Stellar TESTNET** badge. If the contract
+IDs aren't configured or the chain reads fail, it falls back to the sample data in `src/demoData.ts` and
+shows an amber **Demo mode — sample data** banner. In demo mode, deposits and disbursements are simulated and
+nothing is sent to Stellar. In live mode, sections with no on-chain source yet (vesting milestones,
+transaction history) are shown empty rather than filled with samples.
+
+---
+
+## Security headers & third-party audit
+
+- **Content-Security-Policy** is injected into `index.html` at build time (`vite.config.ts` → `cspPlugin`).
+  `script-src 'self'`, `object-src 'none'`. `connect-src` lists only the backend origin plus Soroban RPC /
+  Horizon for each network. It is not applied to `npm run dev`, because Vite HMR needs inline scripts.
+- **`vercel.json`** adds headers a `<meta>` CSP can't set: `frame-ancestors 'none'`, `X-Frame-Options`,
+  `nosniff`, `Referrer-Policy`, `Permissions-Policy`, and HSTS.
+- **Third-party origins in use:** Google Fonts (CSS + font files), Soroban RPC / Horizon, and admin-entered
+  campaign cover images (`img-src https:`). No third-party scripts are loaded.
+- **Removed:** unused `@google/genai`, `express`, `dotenv`, `tsx`, and `autoprefixer` dependencies, the AI Studio
+  `metadata.json`, and a remote `lh3.googleusercontent.com` profile image (replaced with a local icon).
 
 ---
 
@@ -203,7 +235,8 @@ npm run clean         # Remove dist/
 ```
 shieldfund-frontend/
 ├── index.html
-├── vite.config.ts
+├── vite.config.ts                        # Includes the build-time CSP plugin
+├── vercel.json                           # Security headers
 ├── tsconfig.json
 ├── .env.example                          # Copy to .env — testnet IDs prefilled
 ├── docs/screenshots/                     # UI screenshots for README
@@ -212,7 +245,7 @@ shieldfund-frontend/
     ├── main.tsx                          # React root
     ├── App.tsx                           # Tab routing + global state
     ├── types.ts                          # Shared TypeScript interfaces
-    ├── initialData.ts                    # Mock data (no contracts needed for local dev)
+    ├── demoData.ts                       # Sample data, shown only in labelled demo mode
     ├── index.css                         # Tailwind + global styles
     │
     ├── components/
@@ -232,13 +265,17 @@ shieldfund-frontend/
     │   ├── NotificationsPanel.tsx
     │   └── EmptyState.tsx
     │
+    ├── assets/images/shield-logo.jpg     # Logo (imported, so it is bundled and hashed)
+    │
     ├── lib/
     │   ├── contracts.ts                  # ← Live contract IDs + network config
+    │   ├── backend.ts                    # shieldfund-backend client (proofs, campaigns)
     │   └── stellar.ts                    # Soroban invocation helpers
     │
     └── test/
         ├── setup.ts
         ├── App.test.tsx
+        ├── backend.test.ts
         ├── contracts.config.test.ts
         └── stellar.helpers.test.ts
 ```

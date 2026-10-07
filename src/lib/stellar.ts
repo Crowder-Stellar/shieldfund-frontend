@@ -19,8 +19,11 @@ import {
   scValToNative,
   Address,
   BASE_FEE,
+  Account,
   xdr,
 } from '@stellar/stellar-sdk';
+
+const SIMULATION_SOURCE = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 import {
   isConnected,
@@ -50,6 +53,17 @@ function server(): SorobanRpc.Server {
   }
   return _server;
 }
+
+// ── Byte helpers (browser-safe — Node's Buffer isn't available) ───────────────
+
+/** 64-char hex (optional 0x) → 32 bytes, left-padded. */
+export const hexToBytes32 = (hex: string): Uint8Array => {
+  const clean = hex.replace(/^0x/, '').padStart(64, '0');
+  return Uint8Array.from(clean.match(/../g)!, b => parseInt(b, 16));
+};
+
+export const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 
 // ── Unit conversion helpers ───────────────────────────────────────────────────
 
@@ -197,11 +211,11 @@ async function readContract<T>(
   const networkPassphrase =
     ACTIVE_NETWORK === 'MAINNET' ? Networks.PUBLIC : Networks.TESTNET;
 
-  // For simulation we need any valid account. Use a well-known testnet account
-  // if the caller isn't connected, or fall back to a zero-keypair trick.
-  const address =
-    fallbackAddress ?? 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN';
-  const account = await rpc.getAccount(address);
+  // Simulation needs a source account but doesn't check it exists or sign,
+  // so without a connected wallet the all-zero ed25519 key is used.
+  const account = fallbackAddress
+    ? await rpc.getAccount(fallbackAddress)
+    : new Account(SIMULATION_SOURCE, '0');
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
@@ -277,7 +291,7 @@ export async function disburse(
   const id = activeContracts().TREASURY_VAULT;
   if (!id) throw new Error('TREASURY_VAULT contract ID not set.');
 
-  const hashBytes = Buffer.from(proofHashHex.padStart(64, '0'), 'hex');
+  const hashBytes = hexToBytes32(proofHashHex);
 
   return invokeContract(id, 'disburse', [
     new Address(recipientAddress).toScVal(),
@@ -389,8 +403,7 @@ export async function fetchProofs(): Promise<VerifiableProof[]> {
   return raw.map(p => ({
     id:         `p${p.id}`,
     title:      `${p.proof_type.charAt(0).toUpperCase() + p.proof_type.slice(1)} Proof #${p.id}`,
-    hash:       '0x' + Buffer.from(p.proof_hash).toString('hex').slice(0, 6) + '…' +
-                Buffer.from(p.proof_hash).toString('hex').slice(-4),
+    hash:       '0x' + bytesToHex(p.proof_hash).slice(0, 6) + '…' + bytesToHex(p.proof_hash).slice(-4),
     date:       new Date(Number(p.timestamp) * 1000).toLocaleDateString('en-GB', {
       day: '2-digit', month: '2-digit', year: 'numeric',
     }).replace(/\//g, '.'),
@@ -413,8 +426,8 @@ export async function registerProof(
   const id = activeContracts().PROOF_REGISTRY;
   if (!id) throw new Error('PROOF_REGISTRY contract ID not set.');
 
-  const proofHashBytes      = Buffer.from(proofHashHex.padStart(64, '0'), 'hex');
-  const publicInputsBytes   = Buffer.from(publicInputsHashHex.padStart(64, '0'), 'hex');
+  const proofHashBytes      = hexToBytes32(proofHashHex);
+  const publicInputsBytes   = hexToBytes32(publicInputsHashHex);
 
   return invokeContract(id, 'register_proof', [
     new Address(signerAddress).toScVal(),
@@ -429,7 +442,7 @@ export async function verifyProofOnChain(proofHashHex: string): Promise<boolean>
   const id = activeContracts().PROOF_REGISTRY;
   if (!id) return false;
 
-  const hashBytes = Buffer.from(proofHashHex.padStart(64, '0'), 'hex');
+  const hashBytes = hexToBytes32(proofHashHex);
   try {
     return await readContract<boolean>(id, 'verify_proof_exists', [
       nativeToScVal(hashBytes, { type: 'bytes' }),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Wallet, Activity, ShieldCheck, History } from 'lucide-react';
+import { Compass, Wallet, Activity, ShieldCheck, History, FlaskConical, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Subcomponents
@@ -19,17 +19,18 @@ import CreateStreamModal from './components/CreateStreamModal';
 import DepositModal from './components/DepositModal';
 import DisburseModal from './components/DisburseModal';
 
-// Initial Data & Types
+// Demo Data & Types
 import {
-  initialCampaigns,
-  initialVesting,
-  initialStreams,
-  initialProofs,
-  initialTransactions,
-  initialTreasury,
-  initialAuditLogs,
-} from './initialData';
-import { Campaign, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
+  demoCampaigns,
+  demoVesting,
+  demoStreams,
+  demoProofs,
+  demoTransactions,
+  demoTreasury,
+  demoAuditLogs,
+} from './demoData';
+import { Campaign, MilestoneVesting, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
+import shieldLogo from './assets/images/shield-logo.jpg';
 
 // Chain integration
 import {
@@ -39,7 +40,31 @@ import {
   deposit as chainDeposit,
   disburse as chainDisburse,
 } from './lib/stellar';
-import { activeContracts, ACTIVE_NETWORK } from './lib/contracts';
+import { fetchCampaigns, type BackendCampaign } from './lib/backend';
+import { activeContracts, ACTIVE_NETWORK, STROOPS_PER_USDC } from './lib/contracts';
+
+const EMPTY_TREASURY: TreasuryData = { vaultBalance: 0, totalRaised: 0, totalDisbursed: 0, lastAuditTime: '—' };
+
+/**
+ * 'loading' until the first read finishes; 'live' when the dashboard shows
+ * real contract/backend data; 'demo' when it falls back to sample data
+ * (contracts not configured or Stellar unreachable) — always labelled in the UI.
+ */
+type DataMode = 'loading' | 'live' | 'demo';
+
+function campaignFromBackend(c: BackendCampaign): Campaign {
+  const meta = c.metadata ?? {};
+  const image = typeof meta.image === 'string' && meta.image.startsWith('https://') ? meta.image : shieldLogo;
+  return {
+    id: c.id,
+    title: c.title,
+    description: typeof meta.description === 'string' ? meta.description : '',
+    raised: 0,
+    goal: Number(BigInt(c.goal)) / Number(STROOPS_PER_USDC),
+    image,
+    zkVerified: false,
+  };
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -63,16 +88,18 @@ export default function App() {
     localStorage.setItem('shieldfund_theme', theme);
   }, [theme]);
 
-  // Stateful Data
-  const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
+  // Stateful Data — starts empty; filled by live reads or, failing that, demo data
+  const [dataMode, setDataMode] = useState<DataMode>('loading');
+  const [demoReason, setDemoReason] = useState<string>('');
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(3);
-  const [vestingList, setVestingList] = useState(initialVesting);
-  const [streams, setStreams] = useState<Stream[]>(initialStreams);
-  const [proofs, setProofs] = useState<VerifiableProof[]>(initialProofs);
-  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
-  const [treasuryData, setTreasuryData] = useState<TreasuryData>(initialTreasury);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [vestingList, setVestingList] = useState<MilestoneVesting[]>([]);
+  const [streams, setStreams] = useState<Stream[]>([]);
+  const [proofs, setProofs] = useState<VerifiableProof[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [treasuryData, setTreasuryData] = useState<TreasuryData>(EMPTY_TREASURY);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
   // Wallet Connection State
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -84,30 +111,73 @@ export default function App() {
   const actor = (addr: string | null) =>
     addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : 'Demo Mode';
 
-  // Fetch live data from Soroban contracts after wallet connect.
-  // Silently falls back to demo data when contract IDs are not yet set.
-  const loadChainData = async (address: string) => {
-    if (!activeContracts().TREASURY_VAULT) return;
+  const enterDemoMode = (reason: string) => {
+    setDataMode('demo');
+    setDemoReason(reason);
+    setCampaigns(demoCampaigns);
+    setVestingList(demoVesting);
+    setStreams(demoStreams);
+    setProofs(demoProofs);
+    setTransactions(demoTransactions);
+    setTreasuryData(demoTreasury);
+    setAuditLogs(demoAuditLogs);
+    setUnreadCount(demoAuditLogs.length);
+  };
+
+  // Read live state from the Soroban contracts (simulation — no wallet needed)
+  // and campaign metadata from the backend. Falls back to clearly-labelled
+  // demo data if contracts aren't configured or the chain reads fail.
+  const loadLiveData = async () => {
+    const ids = activeContracts();
+    if (!ids.TREASURY_VAULT || !ids.STREAMING || !ids.PROOF_REGISTRY) {
+      enterDemoMode('Contract IDs are not configured.');
+      return;
+    }
     setIsChainLoading(true);
     try {
-      const [vaultStats, chainStreams, chainProofs] = await Promise.allSettled([
+      const [vaultStats, chainStreams, chainProofs, backendCampaigns] = await Promise.allSettled([
         fetchVaultStats(),
         fetchStreams(),
         fetchProofs(),
+        fetchCampaigns(),
       ]);
-      if (vaultStats.status === 'fulfilled') setTreasuryData(vaultStats.value);
-      if (chainStreams.status === 'fulfilled' && chainStreams.value.length > 0) {
-        setStreams(chainStreams.value);
+      if (
+        vaultStats.status !== 'fulfilled' ||
+        chainStreams.status !== 'fulfilled' ||
+        chainProofs.status !== 'fulfilled'
+      ) {
+        const reasons = [vaultStats, chainStreams, chainProofs]
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+        console.warn('[ShieldFund] Live chain read failed — showing demo data:', reasons.join(' | '));
+        enterDemoMode(`Could not read contracts on Stellar ${ACTIVE_NETWORK}.`);
+        return;
       }
-      if (chainProofs.status === 'fulfilled' && chainProofs.value.length > 0) {
-        setProofs(chainProofs.value);
+
+      setDataMode('live');
+      setDemoReason('');
+      setTreasuryData(vaultStats.value);
+      setStreams(chainStreams.value);
+      setProofs(chainProofs.value);
+      if (backendCampaigns.status === 'fulfilled') {
+        setCampaigns(backendCampaigns.value.map(campaignFromBackend));
+      } else {
+        console.warn('[ShieldFund] Backend campaigns unavailable.', backendCampaigns.reason);
+        setCampaigns([]);
       }
-    } catch (err) {
-      console.warn('[ShieldFund] Chain read failed, keeping demo data.', err);
+      // No on-chain source for these yet — show nothing rather than samples.
+      setVestingList([]);
+      setTransactions([]);
+      setAuditLogs([]);
+      setUnreadCount(0);
     } finally {
       setIsChainLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadLiveData();
+  }, []);
 
   // Modal Control
   const [isLaunchCampaignOpen, setIsLaunchCampaignOpen] = useState(false);
@@ -193,6 +263,9 @@ export default function App() {
     donor: string,
     category: 'Operational' | 'Investment' | 'Grant' | 'Other' = 'Investment',
   ): Promise<string> => {
+    if (dataMode === 'live' && !walletAddress) {
+      throw new Error('Connect a Freighter wallet to deposit.');
+    }
     const txId        = 't_' + Date.now();
     const logId       = 'log_' + (Date.now() + 1);
     const pendingHash = `pending_${Date.now().toString(16)}`;
@@ -217,7 +290,7 @@ export default function App() {
     setAuditLogs(prev => [newLog, ...prev]);
     setUnreadCount(prev => prev + 1);
 
-    if (walletAddress && activeContracts().TREASURY_VAULT) {
+    if (walletAddress && dataMode === 'live') {
       // Throws on user rejection or chain failure — modal catches and shows error
       const realHash = await chainDeposit(amount, walletAddress);
       const shortHash = `${realHash.slice(0, 6)}...${realHash.slice(-4)}`;
@@ -226,7 +299,7 @@ export default function App() {
       return realHash;
     }
 
-    // Demo mode: short artificial delay so the modal lifecycle is visible
+    // Demo mode only: simulated — nothing is sent to Stellar
     await new Promise(r => setTimeout(r, 1000));
     return pendingHash;
   };
@@ -237,6 +310,13 @@ export default function App() {
     reason: string,
     category: 'Operational' | 'Investment' | 'Grant' | 'Other' = 'Operational',
   ): Promise<string> => {
+    const isValidStellarAddr = /^G[A-Z2-7]{55}$/.test(recipient);
+    if (dataMode === 'live' && !walletAddress) {
+      throw new Error('Connect a Freighter wallet to disburse.');
+    }
+    if (dataMode === 'live' && !isValidStellarAddr) {
+      throw new Error('Recipient must be a Stellar G... address.');
+    }
     const txId        = 't_' + Date.now();
     const logId       = 'log_' + (Date.now() + 1);
     const pendingHash = `pending_${Date.now().toString(16)}`;
@@ -260,8 +340,7 @@ export default function App() {
     setAuditLogs(prev => [newLog, ...prev]);
     setUnreadCount(prev => prev + 1);
 
-    const isValidStellarAddr = /^G[A-Z2-7]{55}$/.test(recipient);
-    if (walletAddress && activeContracts().TREASURY_VAULT && isValidStellarAddr) {
+    if (walletAddress && dataMode === 'live' && isValidStellarAddr) {
       const realHash = await chainDisburse(recipient, amount, '0'.repeat(64), walletAddress);
       const shortHash = `${realHash.slice(0, 6)}...${realHash.slice(-4)}`;
       setTransactions(prev => prev.map(tx => tx.id === txId ? { ...tx, txHash: shortHash } : tx));
@@ -381,6 +460,7 @@ export default function App() {
         <div className="flex-1 md:pl-56 min-w-0 flex flex-col">
           {/* Primary Content Panel - beautifully responsive */}
           <main className="flex-1 pt-24 px-4 md:px-8 pb-32 md:pb-12 max-w-[1200px] mx-auto w-full institutional-gradient">
+            <DataModeBanner mode={dataMode} reason={demoReason} loading={isChainLoading} />
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -536,24 +616,19 @@ export default function App() {
           setAuditLogs((prev) => [newLog, ...prev]);
           setUnreadCount((prev) => prev + 1);
 
-          // Load real chain data — silently skips if contracts aren't deployed yet
-          await loadChainData(address);
+          // Refresh live data now that a wallet is connected
+          if (dataMode === 'live') await loadLiveData();
         }}
         onDisconnect={() => {
           const short = actor(walletAddress);
           setWalletAddress(null);
           setWalletType(null);
 
-          // Revert to demo data so the UI stays useful while disconnected
-          setTreasuryData(initialTreasury);
-          setStreams(initialStreams);
-          setProofs(initialProofs);
-
           const newLog = {
             id: `log-${Date.now()}`,
             timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
             action: 'WALLET_DISCONNECT' as const,
-            details: `Freighter session closed for ${short}. Reverted to demo data.`,
+            details: `Freighter session closed for ${short}.`,
             actor: short,
             severity: 'info' as const,
           };
@@ -561,6 +636,36 @@ export default function App() {
           setUnreadCount((prev) => prev + 1);
         }}
       />
+    </div>
+  );
+}
+
+function DataModeBanner({ mode, reason, loading }: { mode: DataMode; reason: string; loading: boolean }) {
+  if (mode === 'loading') {
+    return (
+      <div role="status" className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 font-mono text-xs text-slate-400">
+        Loading live data from Stellar {ACTIVE_NETWORK}…
+      </div>
+    );
+  }
+  if (mode === 'live') {
+    return (
+      <div role="status" className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-emerald-400">
+        <Radio className="h-3 w-3" />
+        Live · Stellar {ACTIVE_NETWORK}{loading ? ' · refreshing' : ''}
+      </div>
+    );
+  }
+  return (
+    <div role="alert" className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+      <FlaskConical className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+      <div className="text-xs text-amber-200">
+        <p className="font-mono font-bold uppercase tracking-widest text-amber-400">Demo mode — sample data</p>
+        <p className="mt-1">
+          {reason} Balances, campaigns, streams, proofs and transactions shown here are not real, and deposits or
+          disbursements are simulated — nothing is sent to Stellar.
+        </p>
+      </div>
     </div>
   );
 }
