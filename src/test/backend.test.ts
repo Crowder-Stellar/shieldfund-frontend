@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   addressToField,
   anchorProof,
+  createCampaign,
   BackendError,
   setAdminToken,
   getAdminToken,
@@ -53,7 +54,7 @@ describe('anchorProof', () => {
   it.each([
     [400, { error: 'Invalid request', details: [{ path: 'amount', message: 'bad' }] }, 'invalid', /amount: bad/],
     [401, { error: 'Unauthorized' }, 'unauthorized', /admin token/i],
-    [409, { error: 'dup' }, 'duplicate', /already anchored/i],
+    [409, { error: 'This proof hash is already registered on-chain' }, 'duplicate', /already registered/i],
     [422, { error: 'amount <= budget_cap' }, 'rejected', /budget_cap/],
     [429, { error: 'slow down' }, 'rate_limited', /too many/i],
     [502, { error: 'Proof server unreachable' }, 'upstream', /proof server/i],
@@ -72,5 +73,32 @@ describe('anchorProof', () => {
     setAdminToken('t');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(anchorProof(input)).rejects.toMatchObject({ kind: 'unreachable' });
+  });
+});
+
+describe('createCampaign', () => {
+  const campaign = { id: 'relief-q4', title: 'Relief', goal: '25000000000', metadata: { description: 'x' } };
+
+  it('requires an admin token', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await expect(createCampaign(campaign)).rejects.toMatchObject({ kind: 'unauthorized' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('POSTs to /api/campaigns with the bearer token', async () => {
+    setAdminToken('t');
+    const spy = mockFetch(201, { id: 'relief-q4', status: 'created' });
+    await createCampaign(campaign);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/campaigns$/);
+    expect(init?.method).toBe('POST');
+    expect((init?.headers as Record<string, string>).authorization).toBe('Bearer t');
+    expect(JSON.parse(String(init?.body))).toEqual(campaign);
+  });
+
+  it('maps an existing id to a duplicate error', async () => {
+    setAdminToken('t');
+    mockFetch(409, { error: 'Campaign relief-q4 already exists' });
+    await expect(createCampaign(campaign)).rejects.toMatchObject({ kind: 'duplicate', status: 409 });
   });
 });

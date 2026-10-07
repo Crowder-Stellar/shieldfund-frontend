@@ -91,7 +91,7 @@ function messageFor(kind: BackendErrorKind, body: Record<string, unknown>): stri
       return `Invalid request${details ? ` — ${details}` : serverMsg ? ` — ${serverMsg}` : ''}`;
     }
     case 'unauthorized': return 'Admin token missing or rejected by the backend.';
-    case 'duplicate':    return 'This proof is already anchored on-chain.';
+    case 'duplicate':    return serverMsg ?? 'Already exists.';
     case 'rejected':     return `Proof rejected by the circuit: ${serverMsg ?? 'constraints not satisfied'}`;
     case 'rate_limited': return 'Too many requests — wait a few minutes and try again.';
     case 'upstream':     return `Proof server unavailable: ${serverMsg ?? 'no response'}`;
@@ -138,6 +138,22 @@ export async function anchorProof(input: AnchorProofInput): Promise<AnchorProofR
       authorization: `Bearer ${adminToken}`,
     },
     body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Creates campaign metadata on the backend (admin-only, create-only).
+ * Throws BackendError — `duplicate` if the id exists, `unauthorized` on a bad token.
+ */
+export async function createCampaign(campaign: BackendCampaign): Promise<void> {
+  if (!adminToken) throw new BackendError('unauthorized', 'Admin token required.');
+  await request<{ id: string; status: string }>('/api/campaigns', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify(campaign),
   });
 }
 
