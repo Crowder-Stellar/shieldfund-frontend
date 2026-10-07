@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, PlusCircle, Play, Pause, Settings, CheckCircle2, Circle } from 'lucide-react';
+import { Activity, PlusCircle, Play, Pause, Settings, CheckCircle2, Circle, AlertTriangle, X } from 'lucide-react';
 import { Stream, MilestoneVesting } from '../types';
 import EmptyState from './EmptyState';
 
@@ -8,6 +8,10 @@ interface StreamsTabProps {
   vestingList: MilestoneVesting[];
   onOpenCreateStream: () => void;
   onToggleStream: (id: string) => void;
+  /** Stream whose pause/resume transaction is in flight. */
+  pendingStreamId?: string | null;
+  actionError?: string | null;
+  onDismissError?: () => void;
 }
 
 export default function StreamsTab({
@@ -15,6 +19,9 @@ export default function StreamsTab({
   vestingList,
   onOpenCreateStream,
   onToggleStream,
+  pendingStreamId = null,
+  actionError = null,
+  onDismissError,
 }: StreamsTabProps) {
   // We want to support real-time ticking for active streams!
   const [accumulatedValues, setAccumulatedValues] = useState<{ [key: string]: number }>({});
@@ -57,6 +64,17 @@ export default function StreamsTab({
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <div role="alert" className="flex items-start gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{actionError}</span>
+          {onDismissError && (
+            <button type="button" onClick={onDismissError} aria-label="Dismiss" className="text-rose-300 hover:text-white cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="space-y-1">
@@ -180,7 +198,9 @@ export default function StreamsTab({
                     <div className="flex gap-2">
                       <button
                         onClick={() => onToggleStream(stream.id)}
-                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors border border-slate-700 cursor-pointer active:scale-95"
+                        disabled={pendingStreamId !== null}
+                        aria-busy={pendingStreamId === stream.id}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-wait text-slate-200 transition-colors border border-slate-700 cursor-pointer active:scale-95"
                         title={stream.status === 'ACTIVE' ? 'Pause Stream' : 'Resume Stream'}
                       >
                         {stream.status === 'ACTIVE' ? (

@@ -34,6 +34,16 @@ export interface Stream {
   status: 'ACTIVE' | 'PAUSED';
 }
 
+/** What the Create Stream form collects. */
+export interface NewStreamInput {
+  title: string;
+  /** Full Stellar G... address. */
+  recipient: string;
+  flowRateMonthly: number;
+  /** ISO date, YYYY-MM-DD. */
+  endDate: string;
+}
+
 export interface VerifiableProof {
   id: string;
   title: string;

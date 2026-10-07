@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
-import { X, Activity, DollarSign, UserCheck } from 'lucide-react';
-import { Stream } from '../types';
+import { X, Activity, DollarSign, UserCheck, AlertTriangle } from 'lucide-react';
+import { NewStreamInput } from '../types';
 
 interface CreateStreamModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (stream: Stream) => void;
+  /** Resolves once the stream exists (on-chain in live mode); rejects with a displayable error. */
+  onSubmit: (input: NewStreamInput) => Promise<void>;
 }
+
+const tomorrow = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
 
 export default function CreateStreamModal({
   isOpen,
@@ -17,31 +24,37 @@ export default function CreateStreamModal({
   const [recipient, setRecipient] = useState('');
   const [flowRate, setFlowRate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !recipient || !flowRate) return;
+  const close = () => {
+    if (isSubmitting) return;
+    setError(null);
+    onClose();
+  };
 
-    // Check key formatting, display standard format
-    let formattedKey = recipient.trim();
-    if (formattedKey.length > 10) {
-      formattedKey = `${formattedKey.substring(0, 6)}...${formattedKey.substring(formattedKey.length - 4)}`;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title || !recipient || !flowRate || !endDate) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit({
+        title: title.trim(),
+        recipient: recipient.trim(),
+        flowRateMonthly: parseFloat(flowRate),
+        endDate,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the stream.');
+      setIsSubmitting(false);
+      return;
     }
 
-    const newStream: Stream = {
-      id: 's_' + Date.now(),
-      title,
-      recipient: formattedKey,
-      accumulatedValue: 0.0,
-      flowRateAmount: parseFloat(flowRate),
-      endDate: endDate || 'Dec 31, 2026',
-      status: 'ACTIVE',
-    };
-
-    onSubmit(newStream);
-    // Reset state
+    setIsSubmitting(false);
     setTitle('');
     setRecipient('');
     setFlowRate('');
@@ -60,7 +73,7 @@ export default function CreateStreamModal({
             <h3 className="font-display font-bold text-xl text-slate-100">Create Capital Stream</h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={close}
             className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -91,7 +104,7 @@ export default function CreateStreamModal({
               <input
                 type="text"
                 required
-                placeholder="0x71C...4f2E or similar public key"
+                placeholder="G... Stellar address"
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
                 className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm transition-all font-mono"
@@ -119,30 +132,40 @@ export default function CreateStreamModal({
 
           <div className="space-y-1.5">
             <label className="text-xs font-mono font-semibold text-slate-400 uppercase">
-              Stream Expiration Date (Optional)
+              Stream End Date
             </label>
             <input
-              type="text"
-              placeholder="e.g., Dec 31, 2026"
+              type="date"
+              required
+              min={tomorrow()}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl px-4 py-3 text-slate-100 placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm transition-all"
             />
           </div>
 
+          {error && (
+            <div role="alert" className="flex items-start gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
+              disabled={isSubmitting}
               className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-2xl font-sans text-xs font-bold transition-all border border-slate-700 active:scale-95 cursor-pointer"
             >
               CANCEL
             </button>
             <button
               type="submit"
-              className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-2xl font-sans text-xs font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95 cursor-pointer border border-indigo-500/30"
+              disabled={isSubmitting}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-wait text-white py-3 rounded-2xl font-sans text-xs font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95 cursor-pointer border border-indigo-500/30"
             >
-              START STREAM
+              {isSubmitting ? 'WAITING FOR SIGNATURE…' : 'START STREAM'}
             </button>
           </div>
         </form>
