@@ -29,7 +29,7 @@ import {
   demoTreasury,
   demoAuditLogs,
 } from './demoData';
-import { Campaign, MilestoneVesting, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
+import { Campaign, MilestoneVesting, NewStreamInput, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
 import shieldLogo from './assets/images/shield-logo.jpg';
 
 // Chain integration
@@ -39,6 +39,8 @@ import {
   fetchProofs,
   deposit as chainDeposit,
   disburse as chainDisburse,
+  createStream as chainCreateStream,
+  toggleStream as chainToggleStream,
 } from './lib/stellar';
 import { fetchCampaigns, type BackendCampaign } from './lib/backend';
 import { activeContracts, ACTIVE_NETWORK, STROOPS_PER_USDC } from './lib/contracts';
@@ -200,38 +202,94 @@ export default function App() {
     setUnreadCount((prev) => prev + 1);
   };
 
-  const handleCreateStream = (newStream: Stream) => {
-    setStreams((prev) => [newStream, ...prev]);
-    const newLog: AuditLogEntry = {
+  const [streamActionError, setStreamActionError] = useState<string | null>(null);
+  const [pendingStreamId, setPendingStreamId] = useState<string | null>(null);
+
+  const logStreamAction = (entry: Pick<AuditLogEntry, 'action' | 'details' | 'severity' | 'txHash'>) => {
+    setAuditLogs((prev) => [{
       id: 'log_' + Date.now(),
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
-      action: 'STREAM_CREATE',
-      details: `Stream "${newStream.title}" created for ${newStream.recipient}. Flow: ${newStream.flowRateAmount} USDC/month.`,
       actor: actor(walletAddress),
-      severity: 'info',
-    };
-    setAuditLogs((prev) => [newLog, ...prev]);
+      ...entry,
+    }, ...prev]);
     setUnreadCount((prev) => prev + 1);
   };
 
-  const handleToggleStream = (id: string) => {
-    setStreams((prev) => {
-      const stream = prev.find((s) => s.id === id);
-      if (stream) {
-        const nextStatus = stream.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
-        const newLog: AuditLogEntry = {
-          id: 'log_' + Date.now(),
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
-          action: 'STREAM_TOGGLE',
-          details: `Stream "${stream.title}" ${nextStatus === 'PAUSED' ? 'paused' : 'resumed'}.`,
-          actor: actor(walletAddress),
-          severity: nextStatus === 'PAUSED' ? 'warning' : 'success',
-        };
-        setAuditLogs((prevLogs) => [newLog, ...prevLogs]);
-        setUnreadCount((prev) => prev + 1);
+  // Re-read streams from the contract after a write, so the UI shows chain state.
+  const refreshStreams = async () => {
+    try {
+      setStreams(await fetchStreams());
+    } catch (err) {
+      console.warn('[ShieldFund] Could not refresh streams after write.', err);
+    }
+  };
+
+  const requireLiveWallet = (what: string): string => {
+    if (!walletAddress) throw new Error(`Connect a Freighter wallet to ${what}.`);
+    return walletAddress;
+  };
+
+  const handleCreateStream = async (input: NewStreamInput): Promise<void> => {
+    const details = `Stream "${input.title}" for ${input.recipient}. Flow: ${input.flowRateMonthly} USDC/month until ${input.endDate}.`;
+
+    if (dataMode === 'live') {
+      // Live: the stream only exists once create_stream succeeds on-chain.
+      const signer = requireLiveWallet('create a stream');
+      if (!/^G[A-Z2-7]{55}$/.test(input.recipient)) {
+        throw new Error('Recipient must be a Stellar G... address.');
       }
-      return prev.map((s) => (s.id === id ? { ...s, status: s.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' } : s));
-    });
+      const txHash = await chainCreateStream(input.recipient, input.flowRateMonthly, input.endDate, signer);
+      logStreamAction({ action: 'STREAM_CREATE', details, severity: 'info', txHash });
+      await refreshStreams();
+      return;
+    }
+
+    // Demo mode: local only — nothing is sent to Stellar.
+    const short = input.recipient.length > 10
+      ? `${input.recipient.slice(0, 6)}...${input.recipient.slice(-4)}`
+      : input.recipient;
+    setStreams((prev) => [{
+      id: 's_' + Date.now(),
+      title: input.title,
+      recipient: short,
+      accumulatedValue: 0,
+      flowRateAmount: input.flowRateMonthly,
+      endDate: new Date(input.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      status: 'ACTIVE',
+    }, ...prev]);
+    logStreamAction({ action: 'STREAM_CREATE', details, severity: 'info' });
+  };
+
+  const handleToggleStream = async (id: string) => {
+    const stream = streams.find((s) => s.id === id);
+    if (!stream || pendingStreamId) return;
+    const nextStatus = stream.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    const details = `Stream "${stream.title}" ${nextStatus === 'PAUSED' ? 'paused' : 'resumed'}.`;
+    setStreamActionError(null);
+
+    if (dataMode === 'live') {
+      // On-chain stream ids are rendered as `s<id>` by fetchStreams.
+      const chainId = Number(id.replace(/^s/, ''));
+      setPendingStreamId(id);
+      try {
+        const signer = requireLiveWallet('pause or resume a stream');
+        if (!Number.isInteger(chainId)) throw new Error(`"${stream.title}" is not an on-chain stream.`);
+        const txHash = await chainToggleStream(chainId, signer);
+        logStreamAction({ action: 'STREAM_TOGGLE', details, severity: nextStatus === 'PAUSED' ? 'warning' : 'success', txHash });
+        await refreshStreams();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Transaction failed';
+        setStreamActionError(`Could not ${nextStatus === 'PAUSED' ? 'pause' : 'resume'} "${stream.title}": ${message}`);
+        logStreamAction({ action: 'STREAM_TOGGLE', details: `Failed: ${details} ${message}`, severity: 'critical' });
+      } finally {
+        setPendingStreamId(null);
+      }
+      return;
+    }
+
+    // Demo mode: local only.
+    setStreams((prev) => prev.map((s) => (s.id === id ? { ...s, status: nextStatus } : s)));
+    logStreamAction({ action: 'STREAM_TOGGLE', details, severity: nextStatus === 'PAUSED' ? 'warning' : 'success' });
   };
 
   const handleAddProof = (newProof: VerifiableProof) => {
@@ -377,6 +435,9 @@ export default function App() {
             vestingList={vestingList}
             onOpenCreateStream={() => setIsCreateStreamOpen(true)}
             onToggleStream={handleToggleStream}
+            pendingStreamId={pendingStreamId}
+            actionError={streamActionError}
+            onDismissError={() => setStreamActionError(null)}
           />
         );
       case 'proofs':
