@@ -21,7 +21,7 @@ The contracts are live on **Stellar Testnet** and wired into this frontend. No e
 | XLM Token SAC | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC) |
 | Admin Account | `GBJ5FP5UB4YUE2EONTPPSAGKZZGDETFZLEJXJRCALSYTJZIDVWAN3C7P` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/account/GBJ5FP5UB4YUE2EONTPPSAGKZZGDETFZLEJXJRCALSYTJZIDVWAN3C7P) |
 
-> These IDs are already set in `src/lib/contracts.ts`. For mainnet or your own testnet deploy, update that file with your contract IDs from [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts).
+> These IDs are the defaults in `src/lib/contracts.ts`. For mainnet or your own deploy, set `VITE_STELLAR_NETWORK` and the `VITE_*_CONTRACT_ID` env vars (no code change needed) with IDs from [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts).
 
 ---
 
@@ -180,10 +180,11 @@ The balance card updates live on every new ledger.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VITE_STELLAR_NETWORK` | `TESTNET` | `TESTNET` or `MAINNET` |
-| `VITE_TREASURY_VAULT_CONTRACT_ID` | set | From [shieldfund-contracts](https://github.com/Crowder-Stellar/shieldfund-contracts) deploy |
-| `VITE_STREAMING_CONTRACT_ID` | set | From deploy |
-| `VITE_PROOF_REGISTRY_CONTRACT_ID` | set | From deploy |
+| `VITE_STELLAR_NETWORK` | `TESTNET` | `TESTNET` or `MAINNET`. Invalid values fail the build. |
+| `VITE_SOROBAN_RPC_URL` | testnet: SDF RPC; mainnet: none | Soroban RPC override. **Required for `MAINNET`.** Ships in the bundle, so use an origin-restricted key. |
+| `VITE_TREASURY_VAULT_CONTRACT_ID` | testnet deploy | Overrides the default in `src/lib/contracts.ts`. Must be a valid `C...` id. |
+| `VITE_STREAMING_CONTRACT_ID` | testnet deploy | Same, for streaming |
+| `VITE_PROOF_REGISTRY_CONTRACT_ID` | testnet deploy | Same, for proof_registry |
 | `VITE_API_BASE_URL` | `http://localhost:4000` | [shieldfund-backend](https://github.com/Crowder-Stellar/shieldfund-backend) URL. Proof requests go here only, and its origin is added to the CSP `connect-src`. |
 
 > `VITE_PROOF_SERVER_URL` is gone: the browser no longer talks to the proof server.
