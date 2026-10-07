@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Wallet, Bell, Menu, Cpu, Sun, Moon } from 'lucide-react';
+import { Wallet, Bell, Menu, Cpu, Sun, Moon, UserCircle2 } from 'lucide-react';
+import shieldLogo from '../assets/images/shield-logo.jpg';
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -60,7 +61,7 @@ export default function Header({
         <div className="flex items-center gap-3">
           <div className="relative p-0.5 rounded-2xl bg-gradient-to-tr from-indigo-500 via-emerald-500 to-indigo-600 shadow-lg shadow-indigo-500/10 shrink-0">
             <img 
-              src="/src/assets/images/shield_logo_1782492391347.jpg" 
+              src={shieldLogo}
               alt="ShieldFund Logo" 
               className="w-11 h-11 rounded-[14px] object-cover border border-black/10"
               referrerPolicy="no-referrer"
@@ -163,13 +164,8 @@ export default function Header({
           )}
         </button>
         
-        <div className="w-8 h-8 rounded-full border border-slate-700 overflow-hidden bg-slate-800 flex items-center justify-center">
-          <img 
-            alt="Profile" 
-            className="w-full h-full object-cover" 
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQbnK3WuJF5IqyF9ltAoXKwTs6HyQIHkQyrkeHR6d9n5M4S4CVCWyJQA-dRNwZXkngopiVexhb5VyJN4YbudNfki5FTWG8tt0JgrM9w5jklqdjRigpo5Ea6TuCZsXBWhFEVufnUbqgsGk8aYG80La_NPcMSQoq2B3bWzYqzBloRJdXpnUulN8RZeDTNwM2W5l3mh9Zosw1bIIAUCWdQqKEt4v6WG27F0b_ZhhahnuFj1zTqJI8tBXUdh9Adcqe-STNCcE6yb08Ayk"
-            referrerPolicy="no-referrer"
-          />
+        <div className="w-8 h-8 rounded-full border border-slate-700 overflow-hidden bg-slate-800 flex items-center justify-center text-slate-400">
+          <UserCircle2 className="w-6 h-6" aria-label="Profile" />
         </div>
       </div>
     </header>

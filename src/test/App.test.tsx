@@ -60,6 +60,13 @@ describe('App — initial render', () => {
     const matches = screen.getAllByText(/vault balance/i);
     expect(matches.length).toBeGreaterThan(0);
   });
+
+  it('labels sample data as demo mode when live chain reads fail', async () => {
+    // stellar-sdk is mocked above, so every contract read fails
+    render(<App />);
+    expect(await screen.findByText(/demo mode — sample data/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing is sent to Stellar/i)).toBeInTheDocument();
+  });
 });
 
 describe('App — Stellar address validation regex', () => {

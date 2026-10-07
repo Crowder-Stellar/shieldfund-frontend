@@ -1,18 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, CheckCircle2, Cpu, Binary, X, ExternalLink } from 'lucide-react';
+import { Shield, Cpu, Binary, X, ExternalLink, KeyRound, AlertTriangle } from 'lucide-react';
 import { VerifiableProof } from '../types';
-import { verifyProofOnChain, registerProof } from '../lib/stellar';
-import { addressToField, proveCompliance } from '../lib/proofServer';
+import {
+  addressToField,
+  anchorProof,
+  BackendError,
+  getAdminToken,
+  setAdminToken,
+} from '../lib/backend';
 import { ACTIVE_NETWORK } from '../lib/contracts';
 
 // Stand-ins for real disbursement data until this modal is wired to an
 // actual payroll run: the connected wallet proves membership in a
-// single-recipient allowlist (itself) against a fixed demo budget. The ZK
-// proof this produces is real — proved and locally verified by
-// shieldfund-proof-server — only the allowlist/budget inputs are canned.
+// single-recipient allowlist (itself) against a fixed demo budget. These are
+// sent only to the ShieldFund backend, never directly to the proof server.
 const DEMO_AMOUNT_STROOPS = '1';
 const DEMO_BUDGET_CAP_STROOPS = '1000000000';
+
+type Phase = 'idle' | 'auth' | 'scanning' | 'computing' | 'validated' | 'failed';
 
 interface ManualVerificationModalProps {
   proof: VerifiableProof | null;
@@ -29,12 +35,14 @@ export default function ManualVerificationModal({
   onVerificationComplete,
   walletAddress,
 }: ManualVerificationModalProps) {
-  const [phase, setPhase]           = useState<'idle' | 'scanning' | 'computing' | 'validated'>('idle');
+  const [phase, setPhase]           = useState<Phase>('idle');
   const [logMessages, setLogMessages] = useState<string[]>([]);
   const [currentMessage, setCurrentMessage] = useState('');
-  const [activeStep, setActiveStep] = useState(0);
   const [stellarTxHash, setStellarTxHash] = useState<string | null>(null);
   const [chainStatus, setChainStatus] = useState<'idle' | 'checking' | 'anchored' | 'exists' | 'error'>('idle');
+  const [tokenInput, setTokenInput] = useState('');
+  const [authError, setAuthError]   = useState<string | null>(null);
+  const [runId, setRunId]           = useState(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const playSound = (type: 'beep' | 'success' | 'process') => {
@@ -78,106 +86,113 @@ export default function ManualVerificationModal({
     } catch (_) {}
   };
 
-  // Main animation sequence
+  // Reset on open/close; ask for the admin token first if we don't have one.
   useEffect(() => {
-    if (!isOpen || !proof) {
-      setPhase('idle'); setLogMessages([]); setCurrentMessage('');
-      setActiveStep(0); setStellarTxHash(null); setChainStatus('idle');
-      return;
-    }
-
-    setPhase('scanning');
-    playSound('beep');
-
-    const steps = [
-      { text: 'Fetching verification keys from L2 contract...', delay: 600 },
-      { text: 'Loading zk-SNARK SRS (Structured Reference String)...', delay: 1200 },
-      { text: 'Decoding public input parameters and witness vectors...', delay: 1800 },
-      { text: 'Phase 1 Complete: Input signals parsed successfully.', delay: 2300, phase: 'computing' as const },
-      { text: 'Computing elliptic curve pairings over BN254...', delay: 3000 },
-      { text: 'Running Groth16 verify algorithm / Noir circuit constraints...', delay: 3700 },
-      { text: 'Validating zero-knowledge proof commitment hash...', delay: 4400 },
-      { text: 'Finalizing attestation certificates...', delay: 5000, phase: 'validated' as const },
-    ];
-
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    steps.forEach((step, index) => {
-      const t = setTimeout(() => {
-        setLogMessages(prev => [...prev, step.text]);
-        setCurrentMessage(step.text);
-        setActiveStep(index + 1);
-        if (step.phase) {
-          setPhase(step.phase);
-          if (step.phase === 'computing') playSound('process');
-          else if (step.phase === 'validated') {
-            playSound('success');
-            onVerificationComplete(proof.id);
-          }
-        } else {
-          playSound('beep');
-        }
-      }, step.delay);
-      timers.push(t);
-    });
-
-    return () => timers.forEach(clearTimeout);
+    setLogMessages([]); setCurrentMessage(''); setStellarTxHash(null); setChainStatus('idle');
+    setAuthError(null);
+    if (!isOpen || !proof) { setPhase('idle'); return; }
+    if (getAdminToken()) startRun();
+    else setPhase('auth');
   }, [isOpen, proof]);
 
-  // Chain anchor — fires when animation reaches computing phase
+  const startRun = () => {
+    setPhase('scanning');
+    setRunId(n => n + 1);
+  };
+
+  const submitToken = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenInput.trim()) return;
+    setAdminToken(tokenInput);
+    setTokenInput('');
+    setAuthError(null);
+    setLogMessages([]);
+    startRun();
+  };
+
+  // Real verification run: prove (+ bb verify) and anchor via the backend.
+  // "validated" is only reached when the backend confirms the anchor.
   useEffect(() => {
-    if (phase !== 'computing' || !isOpen || !proof) return;
+    if (runId === 0 || !isOpen || !proof) return;
 
     let cancelled = false;
-    const pushLog = (msg: string) => {
-      if (!cancelled) setLogMessages(prev => [...prev, msg]);
+    const log = (msg: string) => {
+      if (cancelled) return;
+      setLogMessages(prev => [...prev, msg]);
+      setCurrentMessage(msg);
+    };
+    const fail = (msg: string) => {
+      if (cancelled) return;
+      log(`► Error: ${msg}`);
+      setChainStatus('error');
+      setPhase('failed');
+      playSound('beep');
     };
 
     const run = async () => {
+      playSound('beep');
+      if (!walletAddress) {
+        fail('No wallet connected — connect Freighter to generate a proof.');
+        return;
+      }
+
+      const recipientId = addressToField(walletAddress);
+      log(`► Recipient id derived from wallet: ${recipientId.slice(0, 10)}…`);
+
+      if (cancelled) return;
+      setPhase('computing');
+      setChainStatus('checking');
+      playSound('process');
+      log('► Backend: proving payroll_compliance (Noir → bb prove → bb verify)…');
+
       try {
-        setChainStatus('checking');
-
-        if (!walletAddress) {
-          pushLog('► Proof-server: no wallet connected — cannot generate a proof.');
-          if (!cancelled) setChainStatus('exists');
-          return;
-        }
-
-        pushLog('► Proof-server: deriving recipient id from wallet address...');
-        const recipientId = await addressToField(walletAddress);
-
-        pushLog('► Proof-server: proving payroll_compliance (Noir → bb prove → bb verify)...');
-        const result = await proveCompliance({
+        const result = await anchorProof({
           recipientId,
           amount: DEMO_AMOUNT_STROOPS,
           proofType: proof.type ?? 'payroll',
           allowlist: [recipientId],
           budgetCap: DEMO_BUDGET_CAP_STROOPS,
         });
-        pushLog(`► Proof-server: proved + locally verified in ${result.provingTimeMs}ms ✓`);
-
-        const hashHex = result.proofHash.replace(/^0x/, '');
-        const publicInputsHashHex = result.publicInputsHash.replace(/^0x/, '');
-        pushLog(`► proof_hash: ${hashHex.slice(0, 8)}...${hashHex.slice(-6)}`);
-
-        const exists = await verifyProofOnChain(hashHex);
-        if (exists) {
-          if (!cancelled) setChainStatus('exists');
-          pushLog('► Stellar: Proof already anchored on-chain ✓');
-        } else {
-          pushLog('► Stellar: Anchoring proof to registry contract...');
-          const txHash = await registerProof(hashHex, proof.type ?? 'payroll', publicInputsHashHex, walletAddress);
-          if (!cancelled) { setStellarTxHash(txHash); setChainStatus('anchored'); }
-          pushLog(`► Stellar: Anchored! Tx ${txHash.slice(0, 8)}...${txHash.slice(-6)} ✓`);
+        if (cancelled) return;
+        const hash = result.proofHash.replace(/^0x/, '');
+        log(`► proof_hash: ${hash.slice(0, 8)}…${hash.slice(-6)} ✓`);
+        log(`► Stellar: anchored as proof #${result.proofId}, tx ${result.txHash.slice(0, 8)}…${result.txHash.slice(-6)} ✓`);
+        setStellarTxHash(result.txHash);
+        setChainStatus('anchored');
+        setPhase('validated');
+        playSound('success');
+        onVerificationComplete(proof.id);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof BackendError) {
+          switch (err.kind) {
+            case 'unauthorized':
+              setAdminToken(null);
+              setAuthError(err.message);
+              setChainStatus('idle');
+              setPhase('auth');
+              return;
+            case 'duplicate':
+              log('► Stellar: proof already anchored on-chain ✓');
+              setChainStatus('exists');
+              setPhase('validated');
+              playSound('success');
+              onVerificationComplete(proof.id);
+              return;
+            default:
+              fail(err.message);
+              return;
+          }
         }
-      } catch (e) {
-        if (!cancelled) setChainStatus('error');
-        pushLog(`► Error: ${e instanceof Error ? e.message : 'Connection failed'}`);
+        fail(err instanceof Error ? err.message : 'Verification failed');
       }
     };
 
     run();
     return () => { cancelled = true; };
-  }, [phase, isOpen, proof, walletAddress]);
+    // Re-run only when a new run is started; closing the modal cancels it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, isOpen]);
 
   if (!isOpen || !proof) return null;
 
@@ -192,12 +207,12 @@ export default function ManualVerificationModal({
       window.open(explorerUrl, '_blank', 'noopener,noreferrer');
       return;
     }
-    // Demo mode: download JSON attestation
+    // Already anchored earlier (no new tx): download a JSON attestation
     const blob = new Blob([JSON.stringify({
       proofId: proof.id, proofTitle: proof.title, proofHash: proof.hash,
       proofType: proof.type, verifiedAt: new Date().toISOString(),
-      verifier: 'ShieldFund ZK Verifier v1.2', network: ACTIVE_NETWORK,
-      stellarTxHash: 'demo-mode',
+      verifier: 'shieldfund-proof-server (bb verify) via shieldfund-backend', network: ACTIVE_NETWORK,
+      stellarTxHash: null, anchoredOnChain: chainStatus === 'exists',
     }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -315,6 +330,22 @@ export default function ManualVerificationModal({
                         <motion.path d="M20 6L9 17L4 12" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, ease: 'easeOut', delay: 0.15 }} />
                       </svg>
                     </motion.div>
+                  ) : phase === 'failed' ? (
+                    <motion.div key="failed"
+                      className="absolute w-24 h-24 rounded-full bg-rose-500/10 border-2 border-rose-400 flex flex-col items-center justify-center"
+                      initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+                    >
+                      <AlertTriangle className="w-10 h-10 text-rose-400" />
+                      <span className="font-mono text-[8px] text-rose-300 mt-1 font-bold">FAILED</span>
+                    </motion.div>
+                  ) : phase === 'auth' ? (
+                    <motion.div key="auth"
+                      className="absolute w-24 h-24 rounded-full bg-slate-900 border-2 border-amber-400/60 flex flex-col items-center justify-center"
+                      initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+                    >
+                      <KeyRound className="w-10 h-10 text-amber-400" />
+                      <span className="font-mono text-[8px] text-amber-300 mt-1 font-bold">LOCKED</span>
+                    </motion.div>
                   ) : phase === 'computing' ? (
                     <motion.div key="computing"
                       className="absolute w-24 h-24 rounded-full bg-indigo-600/15 border-2 border-indigo-400 flex flex-col items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.25)]"
@@ -349,7 +380,7 @@ export default function ManualVerificationModal({
                   CURRENT OPERATION
                 </span>
                 <p className="font-sans text-sm font-semibold text-slate-200 mt-1 truncate">
-                  {currentMessage || 'Awaiting witness array input...'}
+                  {phase === 'auth' ? 'Admin token required' : currentMessage || 'Preparing proof request...'}
                 </p>
               </div>
             </div>
@@ -362,7 +393,7 @@ export default function ManualVerificationModal({
                 <div className="bg-slate-950 border border-slate-900 rounded-2xl p-4 space-y-3">
                   <h4 className="font-mono text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-900 pb-1.5 flex justify-between">
                     <span>Proof Parameters</span>
-                    <span className="text-[10px] text-indigo-400 font-normal">Verifier v1.2</span>
+                    <span className="text-[10px] text-indigo-400 font-normal">UltraHonk · bb verify</span>
                   </h4>
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-xs">
@@ -375,7 +406,7 @@ export default function ManualVerificationModal({
                     </div>
                     <div className="flex justify-between items-center text-xs">
                       <span className="text-slate-500">System Model:</span>
-                      <span className="text-slate-300 font-mono">Noir zk-SNARK (Plonk)</span>
+                      <span className="text-slate-300 font-mono">Noir · UltraHonk</span>
                     </div>
 
                     {/* Chain anchor status */}
@@ -411,6 +442,32 @@ export default function ManualVerificationModal({
                   </div>
                 </div>
 
+                {/* Admin token prompt */}
+                {phase === 'auth' && (
+                  <form onSubmit={submitToken} className="bg-slate-950 border border-amber-500/30 rounded-2xl p-4 space-y-2">
+                    <label htmlFor="admin-token" className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest block">
+                      Backend admin token
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Proofs are generated and anchored by the ShieldFund backend. The token is kept in memory for this tab only.
+                    </p>
+                    {authError && <p className="text-[11px] text-rose-400">{authError}</p>}
+                    <div className="flex gap-2">
+                      <input
+                        id="admin-token"
+                        type="password"
+                        autoComplete="off"
+                        value={tokenInput}
+                        onChange={e => setTokenInput(e.target.value)}
+                        className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500/60"
+                      />
+                      <button type="submit" className="px-3 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold cursor-pointer hover:bg-amber-400">
+                        Start
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 {/* Log terminal */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest block">
@@ -428,17 +485,17 @@ export default function ManualVerificationModal({
                           msg.includes('Complete') || msg.includes('Validated') || msg.includes('✓')
                             ? 'text-emerald-400 font-bold' : ''
                         } ${
-                          msg.startsWith('► Stellar error') ? 'text-rose-400' : ''
+                          msg.startsWith('► Error') ? 'text-rose-400 font-bold' : ''
                         }`}
                       >
                         <span className="text-slate-600 shrink-0 select-none">[{100 + i * 8}]</span>
                         <span className="leading-relaxed">{msg}</span>
                       </motion.div>
                     ))}
-                    {phase !== 'validated' && (
+                    {(phase === 'scanning' || phase === 'computing') && (
                       <div className="flex items-center gap-1 text-slate-500">
                         <span className="w-1.5 h-3 bg-indigo-500 animate-pulse inline-block" />
-                        <span className="italic">Awaiting compilation payload...</span>
+                        <span className="italic">Waiting for backend…</span>
                       </div>
                     )}
                   </div>
@@ -452,7 +509,7 @@ export default function ManualVerificationModal({
                   onClick={onClose}
                   className="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 py-3 rounded-2xl font-sans text-xs font-bold transition-all border border-slate-800 active:scale-95 cursor-pointer"
                 >
-                  {phase === 'validated' ? 'CLOSE REPORT' : 'CANCEL'}
+                  {phase === 'validated' || phase === 'failed' ? 'CLOSE REPORT' : 'CANCEL'}
                 </button>
 
                 <button

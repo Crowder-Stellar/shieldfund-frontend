@@ -74,3 +74,13 @@ describe('contracts.ts constants', () => {
     expect(SECONDS_PER_MONTH).toBe(BigInt(30 * 24 * 60 * 60));
   });
 });
+
+describe('hex/byte helpers (browser-safe)', () => {
+  it('round-trips a 32-byte hash and left-pads short input', async () => {
+    const { hexToBytes32, bytesToHex } = await import('../lib/stellar');
+    const hex = 'ab'.repeat(32);
+    expect(bytesToHex(hexToBytes32('0x' + hex))).toBe(hex);
+    expect(bytesToHex(hexToBytes32('1'))).toBe('0'.repeat(63) + '1');
+    expect(hexToBytes32(hex)).toHaveLength(32);
+  });
+});
