@@ -2,22 +2,19 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
-import { NETWORK_CONFIG } from './src/lib/contracts';
+import { resolveConfig, type NetworkConfig } from './src/lib/contracts';
 
 const origin = (url: string) => new URL(url).origin;
 
 /**
  * Builds the Content-Security-Policy from the origins the app actually talks
- * to: the configured backend, Soroban RPC / Horizon for every network, and
+ * to: the configured backend, the active network's Soroban RPC / Horizon, and
  * Google Fonts. Third-party origins are listed here deliberately — adding a
  * new one should be a reviewed change.
  */
-function contentSecurityPolicy(apiBaseUrl: string): string {
-  const connect = new Set<string>(["'self'", origin(apiBaseUrl)]);
-  for (const net of Object.values(NETWORK_CONFIG)) {
-    connect.add(origin(net.sorobanRpcUrl));
-    connect.add(origin(net.horizonUrl));
-  }
+function contentSecurityPolicy(apiBaseUrl: string, network: NetworkConfig): string {
+  const connect = new Set<string>(["'self'", origin(apiBaseUrl), origin(network.horizonUrl)]);
+  if (network.sorobanRpcUrl) connect.add(origin(network.sorobanRpcUrl));
 
   return [
     "default-src 'self'",
@@ -37,14 +34,14 @@ function contentSecurityPolicy(apiBaseUrl: string): string {
 }
 
 // Injected at build time only — Vite's dev server relies on inline scripts for HMR.
-function cspPlugin(apiBaseUrl: string): Plugin {
+function cspPlugin(apiBaseUrl: string, network: NetworkConfig): Plugin {
   return {
     name: 'shieldfund-csp',
     apply: 'build',
     transformIndexHtml: () => [
       {
         tag: 'meta',
-        attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy(apiBaseUrl) },
+        attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy(apiBaseUrl, network) },
         injectTo: 'head-prepend',
       },
     ],
@@ -54,9 +51,11 @@ function cspPlugin(apiBaseUrl: string): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const apiBaseUrl = env.VITE_API_BASE_URL || 'http://localhost:4000';
+  // Same resolution the app does at runtime; also fails the build on bad values.
+  const { config: network } = resolveConfig(env);
 
   return {
-    plugins: [react(), tailwindcss(), cspPlugin(apiBaseUrl)],
+    plugins: [react(), tailwindcss(), cspPlugin(apiBaseUrl, network)],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

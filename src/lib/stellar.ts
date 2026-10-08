@@ -35,6 +35,7 @@ import {
 import {
   activeConfig,
   activeContracts,
+  activeRpcUrl,
   ACTIVE_NETWORK,
   STROOPS_PER_USDC,
   SECONDS_PER_MONTH,
@@ -47,7 +48,7 @@ import type { TreasuryData, Transaction, Stream, VerifiableProof } from '../type
 let _server: SorobanRpc.Server | null = null;
 function server(): SorobanRpc.Server {
   if (!_server) {
-    _server = new SorobanRpc.Server(activeConfig().sorobanRpcUrl, {
+    _server = new SorobanRpc.Server(activeRpcUrl(), {
       allowHttp: false,
     });
   }
