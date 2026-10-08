@@ -34,6 +34,15 @@ export interface Stream {
   status: 'ACTIVE' | 'PAUSED';
 }
 
+/** What the Launch Campaign form collects. */
+export interface NewCampaignInput {
+  title: string;
+  description: string;
+  goalUsdc: number;
+  /** https:// cover image, or empty for the default. */
+  imageUrl: string;
+}
+
 /** What the Create Stream form collects. */
 export interface NewStreamInput {
   title: string;

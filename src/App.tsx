@@ -29,7 +29,7 @@ import {
   demoTreasury,
   demoAuditLogs,
 } from './demoData';
-import { Campaign, MilestoneVesting, NewStreamInput, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
+import { Campaign, MilestoneVesting, NewCampaignInput, NewStreamInput, Stream, VerifiableProof, Transaction, TreasuryData, AuditLogEntry } from './types';
 import shieldLogo from './assets/images/shield-logo.jpg';
 
 // Chain integration
@@ -42,7 +42,7 @@ import {
   createStream as chainCreateStream,
   toggleStream as chainToggleStream,
 } from './lib/stellar';
-import { fetchCampaigns, type BackendCampaign } from './lib/backend';
+import { BackendError, createCampaign, fetchCampaigns, getAdminToken, setAdminToken, type BackendCampaign } from './lib/backend';
 import { activeContracts, ACTIVE_NETWORK, STROOPS_PER_USDC } from './lib/contracts';
 
 const EMPTY_TREASURY: TreasuryData = { vaultBalance: 0, totalRaised: 0, totalDisbursed: 0, lastAuditTime: '—' };
@@ -188,18 +188,67 @@ export default function App() {
   const [isDisburseOpen, setIsDisburseOpen] = useState(false);
 
   // Handlers
-  const handleLaunchCampaign = (newCampaign: Campaign) => {
-    setCampaigns((prev) => [newCampaign, ...prev]);
-    const newLog: AuditLogEntry = {
-      id: 'log_' + Date.now(),
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
-      action: 'CAMPAIGN_LAUNCH',
-      details: `Campaign "${newCampaign.title}" launched. Goal: ${newCampaign.goal.toLocaleString()} USDC.`,
-      actor: actor(walletAddress),
-      severity: 'info',
+  // Set after a 401 so the form re-prompts; otherwise the prompt follows whether a token is held.
+  const [needsCampaignToken, setNeedsCampaignToken] = useState(false);
+
+  const handleLaunchCampaign = async (input: NewCampaignInput, adminToken?: string): Promise<void> => {
+    const logLaunch = () => {
+      setAuditLogs((prev) => [{
+        id: 'log_' + Date.now(),
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC',
+        action: 'CAMPAIGN_LAUNCH',
+        details: `Campaign "${input.title}" launched. Goal: ${input.goalUsdc.toLocaleString()} USDC.`,
+        actor: actor(walletAddress),
+        severity: 'info',
+      }, ...prev]);
+      setUnreadCount((prev) => prev + 1);
     };
-    setAuditLogs((prev) => [newLog, ...prev]);
-    setUnreadCount((prev) => prev + 1);
+
+    if (dataMode === 'live') {
+      // Live: the campaign only exists once the backend has stored it.
+      if (adminToken !== undefined) setAdminToken(adminToken);
+      const slug = input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'campaign';
+      const campaign: BackendCampaign = {
+        id: `${slug}-${Date.now().toString(36)}`,
+        title: input.title,
+        goal: (BigInt(Math.round(input.goalUsdc * 100)) * (STROOPS_PER_USDC / 100n)).toString(),
+        metadata: {
+          description: input.description,
+          ...(input.imageUrl ? { image: input.imageUrl } : {}),
+        },
+      };
+      try {
+        await createCampaign(campaign);
+      } catch (err) {
+        if (err instanceof BackendError && err.kind === 'unauthorized') {
+          setAdminToken(null);
+          setNeedsCampaignToken(true);
+        }
+        throw err;
+      }
+      setNeedsCampaignToken(false);
+      logLaunch();
+      // Show what the backend actually stored.
+      try {
+        setCampaigns((await fetchCampaigns()).map(campaignFromBackend));
+      } catch (err) {
+        console.warn('[ShieldFund] Could not refresh campaigns after launch.', err);
+        setCampaigns((prev) => [campaignFromBackend(campaign), ...prev]);
+      }
+      return;
+    }
+
+    // Demo mode: local only — nothing is saved.
+    setCampaigns((prev) => [{
+      id: 'c_' + Date.now(),
+      title: input.title,
+      description: input.description,
+      raised: 0,
+      goal: input.goalUsdc,
+      image: input.imageUrl || shieldLogo,
+      zkVerified: false, // nothing has been verified for a brand-new campaign
+    }, ...prev]);
+    logLaunch();
   };
 
   const [streamActionError, setStreamActionError] = useState<string | null>(null);
@@ -628,6 +677,7 @@ export default function App() {
         isOpen={isLaunchCampaignOpen}
         onClose={() => setIsLaunchCampaignOpen(false)}
         onSubmit={handleLaunchCampaign}
+        needsAdminToken={dataMode === 'live' && (needsCampaignToken || !getAdminToken())}
       />
       <CreateStreamModal
         isOpen={isCreateStreamOpen}
