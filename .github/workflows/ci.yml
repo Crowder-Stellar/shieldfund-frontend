@@ -47,7 +47,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     if: github.event_name == 'pull_request'
+    # Secrets aren't readable in `if:` directly, so expose the token as env.
+    # Until VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID are set in the
+    # repo's Actions secrets (and on PRs from forks, which never get secrets),
+    # the deploy is skipped with a notice instead of failing the run.
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
+      - name: Check Vercel credentials
+        if: env.VERCEL_TOKEN == ''
+        run: echo "::notice title=Vercel deploy skipped::VERCEL_TOKEN is not set for this run (missing repo secret, or a PR from a fork)."
       - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -62,9 +71,10 @@ jobs:
           VITE_STREAMING_CONTRACT_ID: ${{ secrets.VITE_STREAMING_CONTRACT_ID }}
           VITE_PROOF_REGISTRY_CONTRACT_ID: ${{ secrets.VITE_PROOF_REGISTRY_CONTRACT_ID }}
       - name: Deploy preview to Vercel
+        if: env.VERCEL_TOKEN != ''
         uses: amondnet/vercel-action@v25
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-token: ${{ env.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           working-directory: ./
@@ -74,7 +84,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Secrets aren't readable in `if:` directly, so expose the token as env.
+    # Until VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID are set in the
+    # repo's Actions secrets (and on PRs from forks, which never get secrets),
+    # the deploy is skipped with a notice instead of failing the run.
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
+      - name: Check Vercel credentials
+        if: env.VERCEL_TOKEN == ''
+        run: echo "::notice title=Vercel deploy skipped::VERCEL_TOKEN is not set for this run (missing repo secret, or a PR from a fork)."
       - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -89,9 +108,10 @@ jobs:
           VITE_STREAMING_CONTRACT_ID: ${{ secrets.VITE_STREAMING_CONTRACT_ID }}
           VITE_PROOF_REGISTRY_CONTRACT_ID: ${{ secrets.VITE_PROOF_REGISTRY_CONTRACT_ID }}
       - name: Deploy production to Vercel
+        if: env.VERCEL_TOKEN != ''
         uses: amondnet/vercel-action@v25
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-token: ${{ env.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod'
